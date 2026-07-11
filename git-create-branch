@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  git create-branch [git quick-push options]
+
+Prompts for a branch name, creates it from the current branch, then delegates
+staging, commit message generation, commit, and publish/push to git quick-push.
+Input is slugified, but no branch type prefix is added automatically.
+
+Examples:
+  git create-branch
+  git create-branch -a
+  git create-branch -m "fix: update branch workflow"
+USAGE
+}
+
+die() {
+  printf "git-create-branch: %s\n" "$*" >&2
+  exit 1
+}
+
+trim() {
+  awk '
+    {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+      print
+    }
+  '
+}
+
+slugify_segment() {
+  tr '[:upper:]' '[:lower:]' |
+    sed -E 's/[^a-z0-9._-]+/-/g; s/-+/-/g; s/^[._-]+//; s/[._-]+$//'
+}
+
+normalize_branch_name() {
+  local input="$1"
+  local branch_name=""
+  local segment
+  local slug
+
+  input="$(printf "%s" "$input" | trim)"
+  [ -n "$input" ] || return 1
+
+  while IFS= read -r segment; do
+    slug="$(printf "%s" "$segment" | slugify_segment)"
+    [ -n "$slug" ] || continue
+
+    if [ -z "$branch_name" ]; then
+      branch_name="$slug"
+    else
+      branch_name="$branch_name/$slug"
+    fi
+  done < <(printf "%s\n" "$input" | tr "/" "\n")
+
+  [ -n "$branch_name" ] || return 1
+  printf "%s" "$branch_name"
+}
+
+ensure_ready_to_branch() {
+  local git_dir="$1"
+
+  [ ! -f "$git_dir/MERGE_HEAD" ] || die "当前仓库有未完成的 merge，请先处理"
+  [ ! -d "$git_dir/rebase-merge" ] || die "当前仓库有未完成的 rebase，请先处理"
+  [ ! -d "$git_dir/rebase-apply" ] || die "当前仓库有未完成的 rebase，请先处理"
+}
+
+list_remote_branches() {
+  local found=0
+  local branch
+
+  printf "当前远程分支:\n" >&2
+
+  while IFS= read -r branch; do
+    [ -n "$branch" ] || continue
+    case "$branch" in
+      */HEAD)
+        continue
+        ;;
+    esac
+
+    printf "  %s\n" "$branch" >&2
+    found=1
+  done < <(git for-each-ref --format="%(refname:short)" refs/remotes | sort)
+
+  if [ "$found" -eq 0 ]; then
+    printf "  (本地暂无远程分支缓存；如需刷新，请先执行 git fetch --prune)\n" >&2
+  fi
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+  esac
+done
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "当前目录不在 Git 仓库内"
+ensure_ready_to_branch "$(git rev-parse --git-dir)"
+
+current_branch="$(git symbolic-ref --quiet --short HEAD)" || die "当前处于 detached HEAD，无法创建可发布分支"
+
+list_remote_branches
+
+printf "请输入新分支名: " >&2
+IFS= read -r branch_input || die "没有读取到分支名"
+
+branch_name="$(normalize_branch_name "$branch_input")" || die "分支名为空或无法规范化"
+
+if git show-ref --verify --quiet "refs/heads/$branch_name"; then
+  die "本地分支已存在：$branch_name"
+fi
+
+if git show-ref --verify --quiet "refs/remotes/origin/$branch_name"; then
+  die "远程跟踪分支已存在：origin/$branch_name"
+fi
+
+printf "从 %s 创建分支 %s\n" "$current_branch" "$branch_name"
+git checkout -b "$branch_name"
+
+if ! git quick-push "$@"; then
+  die "分支已创建但提交或推送失败：$branch_name"
+fi

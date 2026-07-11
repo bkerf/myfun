@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  git delete-branch [branch-name]
+
+Deletes the branch locally and from origin. If branch-name is omitted, prompts
+with a branch picker. The current checked-out branch cannot be deleted.
+Remote branches are shown as origin/<branch>; selecting one deletes only remote.
+Input is slugified, but no branch type prefix is added automatically.
+USAGE
+}
+
+die() {
+  printf "git-delete-branch: %s\n" "$*" >&2
+  exit 1
+}
+
+trim() {
+  awk '
+    {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+      print
+    }
+  '
+}
+
+slugify_segment() {
+  tr '[:upper:]' '[:lower:]' |
+    sed -E 's/[^a-z0-9._-]+/-/g; s/-+/-/g; s/^[._-]+//; s/[._-]+$//'
+}
+
+normalize_branch_name() {
+  local input="$1"
+  local branch_name=""
+  local segment
+  local slug
+
+  input="$(printf "%s" "$input" | trim)"
+  [ -n "$input" ] || return 1
+
+  while IFS= read -r segment; do
+    slug="$(printf "%s" "$segment" | slugify_segment)"
+    [ -n "$slug" ] || continue
+
+    if [ -z "$branch_name" ]; then
+      branch_name="$slug"
+    else
+      branch_name="$branch_name/$slug"
+    fi
+  done < <(printf "%s\n" "$input" | tr "/" "\n")
+
+  [ -n "$branch_name" ] || return 1
+  printf "%s" "$branch_name"
+}
+
+is_protected_branch() {
+  case "$1" in
+    main|master|develop)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+collect_branch_candidates() {
+  local current_branch="$1"
+  local branch
+
+  {
+    while IFS= read -r branch; do
+      [ -n "$branch" ] || continue
+      [ "$branch" != "$current_branch" ] || continue
+      ! is_protected_branch "$branch" || continue
+      printf "%s\n" "$branch"
+    done < <(git for-each-ref --format='%(refname:short)' refs/heads | sort)
+
+    if git remote get-url origin >/dev/null 2>&1; then
+      if git show-ref --verify --quiet "refs/remotes/origin/$current_branch" &&
+        ! is_protected_branch "$current_branch"; then
+        printf "origin/%s\n" "$current_branch"
+      fi
+
+      while IFS= read -r branch; do
+        [ -n "$branch" ] || continue
+        [ "$branch" != "HEAD" ] || continue
+        ! is_protected_branch "$branch" || continue
+        printf "origin/%s\n" "$branch"
+      done < <(
+        git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin | sort
+      )
+    fi
+  } | awk 'NF && !seen[$0]++'
+}
+
+select_branch_with_arrows() {
+  local candidate_source="$1"
+  local candidates=()
+  local candidate
+  local selected=0
+  local rendered=0
+  local key=""
+  local rest=""
+  local index
+  local count
+  local menu_lines
+
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    candidates[${#candidates[@]}]="$candidate"
+  done <<EOF
+$candidate_source
+EOF
+
+  count=${#candidates[@]}
+  [ "$count" -gt 0 ] || return 1
+  menu_lines=$((count + 2))
+
+  while true; do
+    if [ "$rendered" -eq 1 ]; then
+      printf "\033[%sA" "$menu_lines" >&2
+    fi
+    printf "\033[J" >&2
+    printf "请选择要删除的分支（↑/↓，Enter 确认，q 取消）:\n" >&2
+
+    index=0
+    while [ "$index" -lt "$count" ]; do
+      if [ "$index" -eq "$selected" ]; then
+        printf "  > %s\n" "${candidates[$index]}" >&2
+      else
+        printf "    %s\n" "${candidates[$index]}" >&2
+      fi
+      index=$((index + 1))
+    done
+    printf "\n" >&2
+    rendered=1
+
+    IFS= read -rsn1 key || return 1
+    case "$key" in
+      ""|$'\n'|$'\r')
+        printf "%s" "${candidates[$selected]}"
+        return 0
+        ;;
+      q|Q)
+        return 2
+        ;;
+      k|K)
+        [ "$selected" -gt 0 ] && selected=$((selected - 1))
+        ;;
+      j|J)
+        [ "$selected" -lt $((count - 1)) ] && selected=$((selected + 1))
+        ;;
+      $'\033')
+        rest=""
+        IFS= read -rsn2 -t 1 rest || true
+        case "$rest" in
+          "[A")
+            [ "$selected" -gt 0 ] && selected=$((selected - 1))
+            ;;
+          "[B")
+            [ "$selected" -lt $((count - 1)) ] && selected=$((selected + 1))
+            ;;
+        esac
+        ;;
+    esac
+  done
+}
+
+select_branch_numbered() {
+  local candidate_source="$1"
+  local candidates=()
+  local candidate
+  local index=0
+  local selection
+
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    candidates[${#candidates[@]}]="$candidate"
+  done <<EOF
+$candidate_source
+EOF
+
+  [ "${#candidates[@]}" -gt 0 ] || return 1
+
+  printf "可删除分支:\n" >&2
+  while [ "$index" -lt "${#candidates[@]}" ]; do
+    printf "  %s) %s\n" "$((index + 1))" "${candidates[$index]}" >&2
+    index=$((index + 1))
+  done
+
+  printf "请输入编号或分支名: " >&2
+  IFS= read -r selection || return 1
+
+  case "$selection" in
+    ''|*[!0-9]*)
+      printf "%s" "$selection"
+      ;;
+    *)
+      if [ "$selection" -ge 1 ] && [ "$selection" -le "${#candidates[@]}" ]; then
+        printf "%s" "${candidates[$((selection - 1))]}"
+      else
+        return 1
+      fi
+      ;;
+  esac
+}
+
+branch_input=""
+remote_only=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -*)
+      die "未知参数：$1"
+      ;;
+    *)
+      branch_input="$1"
+      shift
+      [ "$#" -eq 0 ] || die "一次只能删除一个分支"
+      ;;
+  esac
+done
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "当前目录不在 Git 仓库内"
+current_branch="$(git symbolic-ref --quiet --short HEAD)" || die "当前处于 detached HEAD，无法安全删除分支"
+
+if [ -z "$branch_input" ]; then
+  branch_candidates="$(collect_branch_candidates "$current_branch")"
+  [ -n "$branch_candidates" ] || die "没有可删除分支"
+
+  if [ -t 0 ] || [ "${GIT_DELETE_BRANCH_FORCE_TUI:-0}" = "1" ]; then
+    branch_name="$(select_branch_with_arrows "$branch_candidates")" || die "未选择分支"
+  else
+    branch_input="$(select_branch_numbered "$branch_candidates")" || die "没有读取到分支名"
+    branch_name="$(normalize_branch_name "$branch_input")" || die "分支名为空或无法规范化"
+  fi
+else
+  case "$branch_input" in
+    origin/*)
+      remote_only=1
+      branch_name="$(normalize_branch_name "${branch_input#origin/}")" || die "分支名为空或无法规范化"
+      ;;
+    *)
+      branch_name="$(normalize_branch_name "$branch_input")" || die "分支名为空或无法规范化"
+      ;;
+  esac
+fi
+
+case "${branch_name:-}" in
+  origin/*)
+    remote_only=1
+    branch_name="$(normalize_branch_name "${branch_name#origin/}")" || die "分支名为空或无法规范化"
+    ;;
+esac
+
+! is_protected_branch "$branch_name" || die "拒绝删除受保护分支：$branch_name"
+
+if [ "$remote_only" -eq 0 ]; then
+  [ "$branch_name" != "$current_branch" ] || die "不能删除当前检出的分支：$branch_name"
+fi
+
+local_exists=0
+remote_exists=0
+
+if [ "$remote_only" -eq 0 ] && git show-ref --verify --quiet "refs/heads/$branch_name"; then
+  local_exists=1
+fi
+
+if git remote get-url origin >/dev/null 2>&1 &&
+  git show-ref --verify --quiet "refs/remotes/origin/$branch_name"; then
+  remote_exists=1
+fi
+
+if [ "$remote_only" -eq 1 ] && [ "$remote_exists" -eq 0 ]; then
+  die "远程不存在分支：origin/$branch_name"
+fi
+
+if [ "$remote_only" -eq 0 ] && [ "$local_exists" -eq 0 ] && [ "$remote_exists" -eq 0 ]; then
+  die "本地和远程都不存在分支：$branch_name"
+fi
+
+if [ "$remote_only" -eq 0 ]; then
+  if [ "$local_exists" -eq 1 ]; then
+    git branch -D "$branch_name"
+  else
+    printf "本地分支不存在，跳过：%s\n" "$branch_name"
+  fi
+fi
+
+if [ "$remote_exists" -eq 1 ]; then
+  git push origin --delete "$branch_name"
+else
+  printf "远程分支不存在，跳过：origin/%s\n" "$branch_name"
+fi

@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  git quick-push [-a|--ai] [commit message]
+  git quick-push -m "type(scope): subject"
+
+Stages all changes, commits them, and pushes the current branch.
+By default, a conservative message is generated from changed paths.
+Use -a/--ai to ask Codex for the message when no explicit message is provided.
+USAGE
+}
+
+die() {
+  printf "git-quick-push: %s\n" "$*" >&2
+  exit 1
+}
+
+join_args() {
+  local joined=""
+  local arg
+
+  for arg in "$@"; do
+    if [ -z "$joined" ]; then
+      joined="$arg"
+    else
+      joined="$joined $arg"
+    fi
+  done
+
+  printf "%s" "$joined"
+}
+
+count_changed_paths() {
+  git diff --cached --name-only | wc -l | tr -d " "
+}
+
+generate_commit_message() {
+  local total=0
+  local docs=0
+  local tests=0
+  local config=0
+  local env=0
+  local path
+
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    total=$((total + 1))
+
+    case "$path" in
+      README|README.*|docs/*|*.md)
+        docs=$((docs + 1))
+        ;;
+      tests/*|__tests__/*|*test*|*spec*)
+        tests=$((tests + 1))
+        ;;
+      .gitignore|*.toml|*.yml|*.yaml|*.json)
+        config=$((config + 1))
+        ;;
+      env/*|git-*)
+        env=$((env + 1))
+        ;;
+    esac
+  done < <(git diff --cached --name-only)
+
+  if [ "$total" -eq 0 ]; then
+    printf "chore: update workspace"
+  elif [ "$docs" -eq "$total" ]; then
+    printf "docs: update docs"
+  elif [ "$tests" -eq "$total" ]; then
+    printf "test: update tests"
+  elif [ "$config" -eq "$total" ]; then
+    printf "chore(config): update configuration"
+  elif [ "$env" -eq "$total" ]; then
+    printf "chore(env): update shell environment"
+  else
+    printf "chore: update workspace"
+  fi
+}
+
+build_ai_commit_prompt() {
+  cat <<PROMPT
+Write exactly one Conventional Commit subject line for the staged Git changes.
+
+Rules:
+- Output only the commit subject line.
+- Use English ASCII.
+- Keep it under 72 characters when practical.
+- Prefer one of: feat, fix, refactor, docs, test, chore, ci, build.
+- Do not use markdown, quotes, or explanations.
+
+Changed files:
+$(git diff --cached --name-status)
+
+Diff stat:
+$(git diff --cached --stat)
+
+Patch excerpt:
+$(git diff --cached --no-ext-diff --unified=2 | sed -n '1,500p')
+PROMPT
+}
+
+sanitize_ai_commit_message() {
+  awk '
+    NF {
+      gsub(/\r$/, "")
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+      gsub(/^[-*]+[[:space:]]*/, "")
+      gsub(/^`+|`+$/, "")
+      gsub(/^"+|"+$/, "")
+      print
+      exit
+    }
+  '
+}
+
+generate_ai_commit_message() {
+  local model="${GIT_QUICK_PUSH_AI_MODEL:-gpt-5.3-codex-spark}"
+  local repo_root
+  local message_file
+  local output
+  local message
+
+  command -v codex >/dev/null 2>&1 || return 1
+  repo_root="$(git rev-parse --show-toplevel)"
+  message_file="$(git rev-parse --absolute-git-dir)/git-quick-push-message.$$"
+  : > "$message_file" || return 1
+
+  if ! build_ai_commit_prompt | codex exec \
+    -m "$model" \
+    --sandbox read-only \
+    --ask-for-approval never \
+    --ephemeral \
+    --color never \
+    -o "$message_file" \
+    -C "$repo_root" \
+    - >/dev/null 2>/dev/null; then
+    rm -f "$message_file"
+    return 1
+  fi
+
+  output="$(sed -n '1,20p' "$message_file" 2>/dev/null || true)"
+  rm -f "$message_file"
+
+  message="$(printf "%s\n" "$output" | sanitize_ai_commit_message)"
+  [ -n "$message" ] || return 1
+  printf "%s" "$message"
+}
+
+push_current_branch() {
+  local branch="$1"
+
+  if git rev-parse --abbrev-ref --symbolic-full-name "@{u}" >/dev/null 2>&1; then
+    git push
+    return
+  fi
+
+  if git remote get-url origin >/dev/null 2>&1; then
+    git push -u origin "$branch"
+    return
+  fi
+
+  die "当前分支没有 upstream，也没有 origin remote，无法自动 push"
+}
+
+commit_message=""
+use_ai_message=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -a|--ai)
+      use_ai_message=1
+      shift
+      ;;
+    -m|--message)
+      shift
+      [ "$#" -gt 0 ] || die "-m/--message 需要提交信息"
+      commit_message="$1"
+      shift
+      ;;
+    --)
+      shift
+      if [ "$#" -gt 0 ] && [ -z "$commit_message" ]; then
+        commit_message="$(join_args "$@")"
+      fi
+      break
+      ;;
+    -*)
+      die "未知参数：$1"
+      ;;
+    *)
+      if [ -z "$commit_message" ]; then
+        commit_message="$(join_args "$@")"
+      fi
+      break
+      ;;
+  esac
+done
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "当前目录不在 Git 仓库内"
+
+git_dir="$(git rev-parse --git-dir)"
+if [ -f "$git_dir/MERGE_HEAD" ] || [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]; then
+  die "当前仓库有未完成的 merge/rebase，请先处理后再 quick-push"
+fi
+
+branch="$(git symbolic-ref --quiet --short HEAD)" || die "当前处于 detached HEAD，无法判断要推送的分支"
+
+if [ -z "$(git status --porcelain)" ]; then
+  printf "没有可提交内容，尝试推送当前分支 %s。\n" "$branch"
+  push_current_branch "$branch"
+  exit 0
+fi
+
+git add -A
+
+if git diff --cached --quiet; then
+  printf "没有可提交内容，尝试推送当前分支 %s。\n" "$branch"
+  push_current_branch "$branch"
+  exit 0
+fi
+
+changed_count="$(count_changed_paths)"
+
+if [ -z "$commit_message" ]; then
+  if [ "$use_ai_message" -eq 1 ]; then
+    commit_message="$(generate_ai_commit_message || true)"
+  fi
+
+  if [ -z "$commit_message" ]; then
+    commit_message="$(generate_commit_message)"
+  fi
+fi
+
+printf "提交 %s 个路径：%s\n" "$changed_count" "$commit_message"
+git commit -m "$commit_message" -m "$(git diff --cached --name-only | sed 's/^/- /')"
+push_current_branch "$branch"

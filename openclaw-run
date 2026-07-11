@@ -1,0 +1,39 @@
+#!/bin/bash
+# OpenClaw 一键启动脚本
+# 用法: openclaw-run
+
+set -e
+
+OPENCLAW_DIR="$HOME/github/openclaw"
+
+echo "🦞 OpenClaw 一键启动"
+echo "===================="
+
+# 进入项目目录
+cd "$OPENCLAW_DIR"
+
+# 1. 更新源代码
+echo "📥 更新源代码..."
+git pull origin main
+
+# 2. 安装依赖
+echo "📦 安装依赖..."
+pnpm install
+
+# 3. 构建 UI
+echo "🎨 构建 UI..."
+pnpm ui:build
+
+# 4. 构建项目
+echo "🔨 构建项目..."
+pnpm build
+
+# 5. 链接到全局
+echo "🔗 链接到全局..."
+pnpm link --global
+
+# 6. 启动网关
+echo ""
+echo "✅ 启动网关..."
+echo "=================="
+openclaw gateway --port 18789 --verbose

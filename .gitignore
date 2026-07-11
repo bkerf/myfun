@@ -1,0 +1,20 @@
+.DS_Store
+.history
+.idea/
+.tmp/
+*.log
+*.bak
+*.jar
+*.mp4
+*.tar.gz
+__pycache__/
+.venv/
+env/env_secrets.local.sh
+
+# Downloaded tool bundles and generated binaries
+dex-tools-*/
+jadx/
+node_proj/to_be_decrypted/
+QQMusicHandler
+ngrok
+um-darwin-amd64
