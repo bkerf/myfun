@@ -83,15 +83,31 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
         DEFAULT_NODE_VERSION=$(ls "$NVM_DIR/versions/node" 2>/dev/null | sort -V | tail -1)
     fi
     
-    # 添加默认 node 到 PATH
+    # 解析 22 / 22.22 这类 NVM 版本别名到已安装的完整版本目录
+    _myfun_default_node_bin=""
     if [ -n "$DEFAULT_NODE_VERSION" ] && [ -d "$NVM_DIR/versions/node/v$DEFAULT_NODE_VERSION/bin" ]; then
-        export PATH="$NVM_DIR/versions/node/v$DEFAULT_NODE_VERSION/bin:$PATH"
-        log "已添加 node v$DEFAULT_NODE_VERSION 到 PATH"
+        _myfun_default_node_bin="$NVM_DIR/versions/node/v$DEFAULT_NODE_VERSION/bin"
     elif [ -n "$DEFAULT_NODE_VERSION" ] && [ -d "$NVM_DIR/versions/node/$DEFAULT_NODE_VERSION/bin" ]; then
         # 兼容没有 v 前缀的情况
-        export PATH="$NVM_DIR/versions/node/$DEFAULT_NODE_VERSION/bin:$PATH"
-        log "已添加 node $DEFAULT_NODE_VERSION 到 PATH"
+        _myfun_default_node_bin="$NVM_DIR/versions/node/$DEFAULT_NODE_VERSION/bin"
+    elif [ -n "$DEFAULT_NODE_VERSION" ]; then
+        _myfun_node_version_prefix="${DEFAULT_NODE_VERSION#v}"
+        _myfun_default_node_dir="$(
+            find "$NVM_DIR/versions/node" -mindepth 1 -maxdepth 1 -type d \
+                \( -name "v$_myfun_node_version_prefix" -o -name "v$_myfun_node_version_prefix.*" \) \
+                -print 2>/dev/null | sort -V | tail -1
+        )"
+        if [ -d "$_myfun_default_node_dir/bin" ]; then
+            _myfun_default_node_bin="$_myfun_default_node_dir/bin"
+        fi
     fi
+
+    if [ -n "$_myfun_default_node_bin" ]; then
+        export NVM_BIN="$_myfun_default_node_bin"
+        export PATH="$NVM_BIN:$PATH"
+        log "已添加默认 node 到 PATH: $NVM_BIN"
+    fi
+    unset _myfun_default_node_bin _myfun_default_node_dir _myfun_node_version_prefix
     
     # 定义懒加载函数（包括 claude）
     nvm() {

@@ -209,4 +209,15 @@ function gf() {
     git fetch origin "$branch:$branch" --update-head-ok
 }
 
+# Add a reload subcommand while preserving every native tmuxp command.
+function tmuxp() {
+    if [[ "${1:-}" == "reload" ]]; then
+        shift
+        command tmuxp-reload "$@"
+        return $?
+    fi
+
+    command tmuxp "$@"
+}
+
 log "========== 函数定义完成 =========="

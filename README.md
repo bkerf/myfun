@@ -43,6 +43,18 @@ myfun/
 |------|------|
 | `tms` | 打开 tmux session/window 选择器，支持方向键选择、Enter 直接进入 window、`n` 新建 session、`d`/`x` 关闭、`r` 刷新、`q` 退出 |
 | `tms --list` | 非交互列出当前 tmux sessions 和 windows |
+| `tmuxp reload [session...]` | 重载指定的 tmuxp session；不指定名称时关闭当前 server 的全部 session 并恢复其中的 tmuxp session |
+
+`tmuxp reload` 默认展示关闭/重载计划并要求确认。常用选项：
+
+- `tmuxp reload okpay`：只关闭并重新加载 `okpay`，保留其他 session。
+- `tmuxp reload`：关闭当前 server 的全部 session，再恢复关闭前运行的 tmuxp session。
+- `tmuxp reload --dry-run`：只检查当前 session 与 tmuxp 配置的映射。
+- `tmuxp reload -y`：跳过确认，适合明确的非交互调用。
+- `tmuxp reload --allow-unmanaged`：同时关闭没有 tmuxp 配置、因而无法恢复的 session。
+
+若命令在目标 tmux server 内运行，会先启动脱离 tmux 的后台 worker，再关闭 server；默认日志位于
+`~/.local/state/myfun/tmuxp-reload.log`。原生 `tmuxp` 的其他子命令保持不变。
 
 ---
 
