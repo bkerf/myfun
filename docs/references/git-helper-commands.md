@@ -29,11 +29,12 @@ Behavior:
 
 Commit message behavior:
 
-- Default mode does not call AI.
+- By default, Codex generates a Conventional Commit subject from the staged diff.
 - `-m "message"` or a positional message uses the provided commit subject.
-- `-a` / `--ai` asks Codex to generate a Conventional Commit subject.
-- The AI model defaults to `gpt-5.3-codex-spark`.
-- AI generation is best-effort; if it fails, the script falls back to the local deterministic message generator.
+- `-a` / `--ai` remains accepted for compatibility; AI generation is already the default.
+- The AI model defaults to `gpt-5.6-luna` with Codex service tier `fast`.
+- `GIT_QUICK_PUSH_AI_MODEL` and `GIT_QUICK_PUSH_AI_SERVICE_TIER` can override those defaults.
+- If AI generation fails, the helper stops before commit and push instead of using a fixed fallback message.
 
 ### `git-create-branch`
 

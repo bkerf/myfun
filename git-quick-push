@@ -4,12 +4,12 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  git quick-push [-a|--ai] [commit message]
+  git quick-push [commit message]
   git quick-push -m "type(scope): subject"
 
 Stages all changes, commits them, and pushes the current branch.
-By default, a conservative message is generated from changed paths.
-Use -a/--ai to ask Codex for the message when no explicit message is provided.
+By default, Codex generates the message with gpt-5.6-luna in fast mode.
+The legacy -a/--ai flag is accepted for compatibility and has no extra effect.
 USAGE
 }
 
@@ -35,49 +35,6 @@ join_args() {
 
 count_changed_paths() {
   git diff --cached --name-only | wc -l | tr -d " "
-}
-
-generate_commit_message() {
-  local total=0
-  local docs=0
-  local tests=0
-  local config=0
-  local env=0
-  local path
-
-  while IFS= read -r path; do
-    [ -n "$path" ] || continue
-    total=$((total + 1))
-
-    case "$path" in
-      README|README.*|docs/*|*.md)
-        docs=$((docs + 1))
-        ;;
-      tests/*|__tests__/*|*test*|*spec*)
-        tests=$((tests + 1))
-        ;;
-      .gitignore|*.toml|*.yml|*.yaml|*.json)
-        config=$((config + 1))
-        ;;
-      env/*|git-*)
-        env=$((env + 1))
-        ;;
-    esac
-  done < <(git diff --cached --name-only)
-
-  if [ "$total" -eq 0 ]; then
-    printf "chore: update workspace"
-  elif [ "$docs" -eq "$total" ]; then
-    printf "docs: update docs"
-  elif [ "$tests" -eq "$total" ]; then
-    printf "test: update tests"
-  elif [ "$config" -eq "$total" ]; then
-    printf "chore(config): update configuration"
-  elif [ "$env" -eq "$total" ]; then
-    printf "chore(env): update shell environment"
-  else
-    printf "chore: update workspace"
-  fi
 }
 
 build_ai_commit_prompt() {
@@ -117,7 +74,6 @@ sanitize_ai_commit_message() {
 }
 
 generate_ai_commit_message() {
-  local model="${GIT_QUICK_PUSH_AI_MODEL:-gpt-5.3-codex-spark}"
   local repo_root
   local message_file
   local output
@@ -129,9 +85,10 @@ generate_ai_commit_message() {
   : > "$message_file" || return 1
 
   if ! build_ai_commit_prompt | codex exec \
-    -m "$model" \
+    -m "$ai_model" \
+    -c "service_tier=\"$ai_service_tier\"" \
+    -c 'approval_policy="never"' \
     --sandbox read-only \
-    --ask-for-approval never \
     --ephemeral \
     --color never \
     -o "$message_file" \
@@ -166,7 +123,8 @@ push_current_branch() {
 }
 
 commit_message=""
-use_ai_message=0
+ai_model="${GIT_QUICK_PUSH_AI_MODEL:-gpt-5.6-luna}"
+ai_service_tier="${GIT_QUICK_PUSH_AI_SERVICE_TIER:-fast}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -175,7 +133,6 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     -a|--ai)
-      use_ai_message=1
       shift
       ;;
     -m|--message)
@@ -229,12 +186,8 @@ fi
 changed_count="$(count_changed_paths)"
 
 if [ -z "$commit_message" ]; then
-  if [ "$use_ai_message" -eq 1 ]; then
-    commit_message="$(generate_ai_commit_message || true)"
-  fi
-
-  if [ -z "$commit_message" ]; then
-    commit_message="$(generate_commit_message)"
+  if ! commit_message="$(generate_ai_commit_message)"; then
+    die "Codex 无法使用 ${ai_model}（${ai_service_tier}）生成提交信息；未执行 commit/push"
   fi
 fi
 
