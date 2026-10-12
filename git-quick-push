@@ -117,7 +117,9 @@ sanitize_ai_commit_message() {
 }
 
 generate_ai_commit_message() {
-  local model="${GIT_QUICK_PUSH_AI_MODEL:-gpt-5.3-codex-spark}"
+  local model="${GIT_QUICK_PUSH_AI_MODEL:-gpt-6.1-sol}"
+  local reasoning_effort="${GIT_QUICK_PUSH_AI_REASONING_EFFORT:-low}"
+  local service_tier="${GIT_QUICK_PUSH_AI_SERVICE_TIER:-fast}"
   local repo_root
   local message_file
   local output
@@ -130,6 +132,9 @@ generate_ai_commit_message() {
 
   if ! build_ai_commit_prompt | codex exec \
     -m "$model" \
+    -c "model_reasoning_effort=\"$reasoning_effort\"" \
+    -c "service_tier=\"$service_tier\"" \
+    --enable fast_mode \
     --sandbox read-only \
     --ask-for-approval never \
     --ephemeral \

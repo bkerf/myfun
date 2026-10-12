@@ -30,7 +30,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$original_args" in
-  *"gpt-5.3-codex-spark"*)
+  *"gpt-6.1-sol"*)
     if [ "${CODEX_QUICK_PUSH_TEST_FAIL:-0}" = "1" ]; then
       exit 42
     fi
@@ -79,7 +79,7 @@ git -C "$WORK_DIR" quick-push -a
 test "$(git -C "$WORK_DIR" rev-list --count HEAD)" = "3"
 test -z "$(git -C "$WORK_DIR" status --porcelain)"
 test "$(git -C "$WORK_DIR" log -1 --pretty=%s)" = "feat: add generated commit support"
-grep -q -- "-m gpt-5.3-codex-spark" "$CODEX_LOG"
+grep -q -- "-m gpt-6.1-sol" "$CODEX_LOG"
 
 printf "fallback\n" > "$WORK_DIR/fallback.txt"
 CODEX_QUICK_PUSH_TEST_FAIL=1 git -C "$WORK_DIR" quick-push -a
