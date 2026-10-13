@@ -31,7 +31,7 @@ _codex_with_clash_verge_proxy() {
     all_proxy="$proxy_url" \
     NO_PROXY="$no_proxy" \
     no_proxy="$no_proxy" \
-    "$codex_bin" "$@"
+    python3 "$HOME/.codex/scripts/codex_shared_cli.py" "$codex_bin" "$@"
 }
 
 unalias ch cx cm cu 2>/dev/null
@@ -41,15 +41,15 @@ ch() {
 }
 
 cx() {
-    _codex_with_clash_verge_proxy --yolo --no-daemon --profile cli-xhigh "$@"
+    _codex_with_clash_verge_proxy --yolo --profile cli-xhigh "$@"
 }
 
 cm() {
-    _codex_with_clash_verge_proxy --yolo --no-daemon --profile cli-max "$@"
+    _codex_with_clash_verge_proxy --yolo --profile cli-max "$@"
 }
 
 cu() {
-    _codex_with_clash_verge_proxy --yolo --no-daemon --profile cli-ultra "$@"
+    _codex_with_clash_verge_proxy --yolo --profile cli-ultra "$@"
 }
 
 log "========== 别名定义完成 =========="
