@@ -16,10 +16,10 @@ _codex_with_clash_verge_proxy() {
     all_proxy="$proxy_url" \
     NO_PROXY="$no_proxy" \
     no_proxy="$no_proxy" \
-    codex "$@"
+    python3 "$HOME/.codex/scripts/codex_shared_cli.py" codex "$@"
 }
 
-unalias ch cx 2>/dev/null
+unalias ch cx cm cu 2>/dev/null
 
 ch() {
     _codex_with_clash_verge_proxy --yolo -c 'model_reasoning_effort="high"' "$@"
@@ -27,6 +27,14 @@ ch() {
 
 cx() {
     _codex_with_clash_verge_proxy --yolo -c 'model_reasoning_effort="xhigh"' "$@"
+}
+
+cm() {
+    _codex_with_clash_verge_proxy --yolo -c 'model_reasoning_effort="max"' "$@"
+}
+
+cu() {
+    _codex_with_clash_verge_proxy --yolo -c 'model_reasoning_effort="ultra"' "$@"
 }
 
 log "========== 别名定义完成 =========="
