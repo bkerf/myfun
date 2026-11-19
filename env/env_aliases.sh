@@ -22,19 +22,19 @@ _codex_with_clash_verge_proxy() {
 unalias ch cx cm cu 2>/dev/null
 
 ch() {
-    _codex_with_clash_verge_proxy --yolo -c 'model_reasoning_effort="high"' "$@"
+    _codex_with_clash_verge_proxy --yolo -c 'model="gpt-6.2-sol"' -c 'model_reasoning_effort="high"' "$@"
 }
 
 cx() {
-    _codex_with_clash_verge_proxy --yolo -c 'model_reasoning_effort="xhigh"' "$@"
+    _codex_with_clash_verge_proxy --yolo -c 'model="gpt-6.2-sol"' -c 'model_reasoning_effort="xhigh"' "$@"
 }
 
 cm() {
-    _codex_with_clash_verge_proxy --yolo -c 'model_reasoning_effort="max"' "$@"
+    _codex_with_clash_verge_proxy --yolo -c 'model="gpt-6.2-sol"' -c 'model_reasoning_effort="max"' "$@"
 }
 
 cu() {
-    _codex_with_clash_verge_proxy --yolo -c 'model_reasoning_effort="ultra"' "$@"
+    _codex_with_clash_verge_proxy --yolo -c 'model="gpt-6.2-sol"' -c 'model_reasoning_effort="ultra"' "$@"
 }
 
 log "========== 别名定义完成 =========="
